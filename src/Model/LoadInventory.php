@@ -42,11 +42,12 @@ class LoadInventory implements LoadInventoryInterface
         $rawInventory = $this->resource->loadInventory($storeId, array_keys($productIdBySku));
         $rawInventoryByProductId = [];
 
-        foreach ($rawInventory as $sku => $productInventory) {
-            $productId = $productIdBySku[$sku];
-            $productInventory['product_id'] = $productId;
-            unset($productInventory['sku']);
-            $rawInventoryByProductId[$productId] = $productInventory;
+        foreach ($rawInventory as $sku => $row) {
+            //TODO: Test is_in_stock & stock_status when using backorders/not-managed-stock
+            $row['is_in_stock'] = $row['stock_status'] = (bool)($row['salable_qty'] > 0);
+            $row['product_id'] = $productIdBySku[$sku];
+            unset($row['sku']);
+            $rawInventoryByProductId[$row['product_id']] = $row;
         }
 
         return $rawInventoryByProductId;
@@ -62,8 +63,7 @@ class LoadInventory implements LoadInventoryInterface
         $idBySku = [];
 
         foreach ($indexData as $productId => $product) {
-            $sku = $product['sku'];
-            $idBySku[$sku] = $productId;
+            $idBySku[$product['sku']] = $productId;
         }
 
         return $idBySku;

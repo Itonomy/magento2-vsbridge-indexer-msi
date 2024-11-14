@@ -12,4 +12,14 @@
             <argument name="loadInventory" xsi:type="object">Divante\VsbridgeIndexerMsi\Model\LoadInventory</argument>
         </arguments>
     </type>
+
+    <type name="Divante\VsbridgeIndexerCatalog\Index\Mapping\StockMapping">
+        <plugin name="es_index_stock_mapping_plugin" type="Divante\VsbridgeIndexerMsi\Plugin\Index\StockMappingPlugin"/>
+    </type>
+
+    <type name="Divante\VsbridgeIndexerCatalog\Model\Indexer\DataProvider\Product\Configurable\PrepareConfigurableProduct">
+        <plugin name="prepare_configurable_product_plugin"
+                type="Divante\VsbridgeIndexerMsi\Plugin\Configurable\PrepareConfigurableProductPlugin"
+        />
+    </type>
 </config>

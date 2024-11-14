@@ -1,18 +1,18 @@
 <?php
-/**
- * @package   Divante\VsbridgeIndexerMsi
- * @author    Agata Firlejczyk <afirlejczyk@divante.pl>
- * @copyright 2019 Divante Sp. z o.o.
- * @license   See LICENSE_DIVANTE.txt for license details.
- */
 
 declare(strict_types=1);
 
 namespace Divante\VsbridgeIndexerMsi\Model\ResourceModel\Product;
 
+use Divante\VsbridgeIndexerMsi\Api\GetStockIdBySalesChannelCodeInterface;
 use Divante\VsbridgeIndexerMsi\Model\GetStockIndexTableByStore;
 use Magento\Framework\App\ResourceConnection;
+use Magento\Framework\DB\Select;
+use Magento\Framework\Exception\LocalizedException;
+use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\InventoryIndexer\Indexer\IndexStructure;
+use Magento\InventoryReservationsApi\Model\ReservationInterface;
+use Magento\Store\Model\StoreManagerInterface;
 
 /**
  * Class Inventory
@@ -28,20 +28,36 @@ class Inventory
     /**
      * @var GetStockIndexTableByStore
      */
-    private $getSockIndexTableByStore;
+    private $getStockIndexTableByStore;
+
+    /**
+     * @var StoreManagerInterface
+     */
+    private $storeManager;
+
+    /**
+     * @var GetStockIdBySalesChannelCodeInterface
+     */
+    private $getStockIdBySalesChannelCode;
 
     /**
      * Inventory constructor.
      *
-     * @param GetStockIndexTableByStore $getSockIndexTableByStore
+     * @param GetStockIndexTableByStore $getStockIndexTableByStore
+     * @param GetStockIdBySalesChannelCodeInterface $getStockIdBySalesChannelCode
      * @param ResourceConnection $resourceModel
+     * @param StoreManagerInterface $storeManager
      */
     public function __construct(
-        GetStockIndexTableByStore $getSockIndexTableByStore,
-        ResourceConnection $resourceModel
+        GetStockIndexTableByStore $getStockIndexTableByStore,
+        GetStockIdBySalesChannelCodeInterface $getStockIdBySalesChannelCode,
+        ResourceConnection $resourceModel,
+        StoreManagerInterface $storeManager
     ) {
-        $this->getSockIndexTableByStore = $getSockIndexTableByStore;
+        $this->getStockIndexTableByStore = $getStockIndexTableByStore;
         $this->resource = $resourceModel;
+        $this->storeManager = $storeManager;
+        $this->getStockIdBySalesChannelCode = $getStockIdBySalesChannelCode;
     }
 
     /**
@@ -60,41 +76,78 @@ class Inventory
     /**
      * @param int $storeId
      * @param array $skuList
-     *
      * @return array
-     * @throws \Magento\Framework\Exception\LocalizedException
-     * @throws \Magento\Framework\Exception\NoSuchEntityException
+     * @throws NoSuchEntityException
+     * @throws LocalizedException
      */
-    public function loadChildrenInventory(int $storeId, array $skuList): array
+    public function getInventoryData(int $storeId, array $skuList): array
     {
-        return $this->getInventoryData($storeId, $skuList);
+        $connection = $this->resource->getConnection();
+        $select = $this->getInventoryDataQuery($storeId, $skuList);
+
+        return $connection->fetchAssoc($select);
     }
 
     /**
-     * @param int $storeId
-     * @param array $productIds
+     * Get inventory query that includes reservations
      *
-     * @return array
+     * @param int $storeId
+     * @param array $skuList
+     * @return Select
+     * @throws NoSuchEntityException
      * @throws \Magento\Framework\Exception\LocalizedException
-     * @throws \Magento\Framework\Exception\NoSuchEntityException
      */
-    private function getInventoryData(int $storeId, array $productIds): array
+    public function getInventoryDataQuery(int $storeId, array $skuList): Select
     {
         $connection = $this->resource->getConnection();
-        $stockItemTableName = $this->getSockIndexTableByStore->execute($storeId);
+        $salableQtyState = \sprintf('(inv.%s + SUM(res.%s))', IndexStructure::QUANTITY, ReservationInterface::QUANTITY);
+        $salableQtyCase = $connection->getCaseSql('', [$salableQtyState . ' > 0' => $salableQtyState], 0);
 
-        $select = $connection->select()
-            ->from(
-                $stockItemTableName,
-                [
-                    'sku' => IndexStructure::SKU,
-                    'qty' => IndexStructure::QUANTITY,
-                    'is_in_stock' => IndexStructure::IS_SALABLE,
-                    'stock_status' => IndexStructure::IS_SALABLE,
-                ]
+        return $connection->select()
+            ->from(['inv' => $this->getStockIndexTableByStore->execute($storeId)], [])
+            ->joinLeft(
+                ['res' => $this->resource->getTableName('inventory_reservation')],
+                \implode(
+                    ' AND ',
+                    [
+                        \sprintf('res.%s = inv.%s', IndexStructure::SKU, ReservationInterface::SKU),
+                        $connection->quoteInto(
+                            \sprintf('res.%s = ?', ReservationInterface::STOCK_ID),
+                            $this->getWebsiteStockId($storeId)
+                        ),
+                    ]
+                ),
+                []
             )
-            ->where(IndexStructure::SKU . ' IN (?)', array_map(function($productId) { return (string)$productId; }, $productIds));
+            ->where(\sprintf('inv.%s IN (?)', IndexStructure::SKU), $skuList)
+            ->group('inv.' . IndexStructure::SKU)
+            ->columns(
+                [
+                    'sku' => 'inv.' . IndexStructure::SKU,
+                    'qty' => 'inv.' . IndexStructure::QUANTITY,
+                    'salable_qty' => $connection->getCheckSql(
+                        \sprintf('res.%s IS NULL', ReservationInterface::QUANTITY),
+                        'inv.' . IndexStructure::QUANTITY,
+                        $salableQtyCase
+                    ),
+                    'is_salable' => 'inv.' . IndexStructure::IS_SALABLE,
+                ]
+            );
+    }
 
-        return $connection->fetchAssoc($select);
+    /**
+     * Retrieve website stock id.
+     *
+     * @param int $storeId
+     *
+     * @return int
+     *
+     * @throws NoSuchEntityException
+     */
+    private function getWebsiteStockId(int $storeId): int
+    {
+        $websiteCode = $this->storeManager->getStore($storeId)->getWebsite()->getCode();
+
+        return $this->getStockIdBySalesChannelCode->execute($websiteCode);
     }
 }
