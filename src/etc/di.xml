@@ -22,4 +22,28 @@
                 type="Divante\VsbridgeIndexerMsi\Plugin\Configurable\PrepareConfigurableProductPlugin"
         />
     </type>
+
+    <!--Mview fix-->
+    <type name="Magento\Framework\Mview\View\SubscriptionFactory">
+        <plugin name="mview_subscription_factory_plugin"
+                type="Divante\VsbridgeIndexerMsi\Plugin\Mview\SubscriptionFactoryPlugin"
+        />
+    </type>
+
+    <type name="Divante\VsbridgeIndexerMsi\Plugin\Mview\SubscriptionFactoryPlugin">
+        <arguments>
+            <argument name="subscriptionModels" xsi:type="array">
+                <item name="inventory_source_item" xsi:type="string">Divante\VsbridgeIndexerMsi\Mview\View\Subscription</item>
+                <item name="inventory_reservation" xsi:type="string">Divante\VsbridgeIndexerMsi\Mview\View\Subscription</item>
+            </argument>
+        </arguments>
+    </type>
+
+    <type name="Divante\VsbridgeIndexerMsi\Mview\View\Subscription">
+        <arguments>
+            <argument name="supportedViewIds" xsi:type="array">
+                <item name="vsbridge_product_indexer" xsi:type="string">vsbridge_product_indexer</item>
+            </argument>
+        </arguments>
+    </type>
 </config>
